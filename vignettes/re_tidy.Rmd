@@ -1,0 +1,111 @@
+---
+title: "re_tidy"
+author: "Lisa Raemy"
+date: "2025-03-02"
+output: html_document
+---
+
+# Analyzing changes in soil organic matter during elevated CO2 experiments
+## Libraries
+
+```{r, message = FALSE}
+library(tidyr)
+library(readr)
+library(dplyr)
+library(knitr)
+```
+
+# Introduction
+
+In this exercise data pubilished by Groeningen et al. (2014) was investigated, where they looked at change in soil carbon stocks due to anthropogenic increase in CO2. Data wrangling was performed and log-response ratios were calculated for different experiments to quantify the effect of elevated CO2 on soil organic matter content. 
+
+**What are the data were looking at?**<br>
+The data shows severalS ecosystems and their properties under different CO2 concentrations. It displays the ecosystems, the dates of the samples and the soil organic matter content under different CO2 concentrations (ambient and elevated). 
+
+**Hypothesis**<br>
+It is expected that the increase of CO2 concentration stimulates the plant growth and therefore also increases the soil organic matter content.
+
+# Data analysis
+
+## Loading data
+
+Data published by Groeningen et al. (2014) was used for this analysis. First the data was manually cleaned and made tidy in excel. 
+
+```{r, message = FALSE}
+#reading csv
+soil_data <- read_delim("../data/soil_data_tidy.csv", delim=";")
+```
+
+## Aggregating data and defining phases
+
+Data is aggregated across all experiments, distinguishing an early phase (<3 years since start), a mid-phase (3-6 years since start) and a late phase (>6 years since start). 
+
+```{r}
+# defining early phase 
+early_phase <- soil_data |> 
+  filter(time_years < 3)
+
+# defining mid phase
+mid_phase <- soil_data |>
+  filter(time_years >= 3 & time_years <=6 )
+
+# defining late phase
+late_phase <- soil_data |> 
+  filter(time_years > 6)
+```
+
+## Calculating log-response for every phase
+
+A function that calculates log-response ratio (RR) is defined. 
+
+```{r}
+calculate_RR <- function(ambient_co2, increased_co2){
+  RR <- log(increased_co2/ambient_co2)
+  return(RR)
+}
+```
+
+Log-response (RR) for each parallel observation of SOC under ambient and elevated CO2 is calculated for every row. 
+
+```{r}
+# calculate RR for early phase, mid phase and late phase
+early_phase <- early_phase |> 
+  mutate(RR = calculate_RR(mean_ambient_CO2, mean_increased_CO2)) 
+
+mid_phase <- mid_phase |> 
+  mutate(RR = calculate_RR(mean_ambient_CO2, mean_increased_CO2)) 
+
+late_phase <- late_phase |> 
+  mutate(RR = calculate_RR(mean_ambient_CO2, mean_increased_CO2))
+```
+RR is aggregated by taking the mean of the parallel observations. 
+```{r}
+# calculating the mean for every phase
+RR_early_phase_mean <- mean(early_phase$RR)
+RR_mid_phase_mean <- mean(mid_phase$RR)
+RR_late_phase_mean <- mean(late_phase$RR)
+```
+
+## Presenting the results as tables
+
+A dataframe for each phase is made and then shown as a table. 
+
+```{r}
+# making a summary dataframe for each phase
+RR_phases_summary <- data.frame(
+  Phase = c("early", "mid", "late"),
+  RR_mean = c(RR_early_phase_mean, RR_mid_phase_mean, RR_late_phase_mean)
+)
+
+# showing the table
+kable(RR_phases_summary)
+```
+
+# Results and interpretation
+
+For the early and mid phase we can observe a slight increase of the soil organic matter content, which is suggested by the positive RR_mean values. These results support the hypothesis. They indicate that the plants initially responded to the increase of CO2 and that there was an increase in biomass input to the soil, which explains the elevation of the carbon storage. 
+
+In the late phase the negative RR_mean suggests a reversed trend. There is a loss in soil organic matter content. This can be explained by the increased microbial activity and therefore the increased decomposition of organic carbon in soils. 
+
+
+

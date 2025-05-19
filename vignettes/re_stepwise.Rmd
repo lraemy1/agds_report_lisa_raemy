@@ -1,0 +1,231 @@
+---
+title: "re_stepwise"
+author: "Lisa Raemy"
+date: "2025-04-07"
+output: html_document
+---
+# Stepwise forward regression
+## Libraries
+```{r, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+```
+
+# Introduction 
+
+In this exercise stepwise forward regression is performed to model GPP as a function of predictors available in the half-hourly ecosystem fluxes dataset. The results are then visualized and discussed. 
+
+# Data analysis - stepwise forward regression
+
+## Reading the data and data cleaning
+For this analysis the half-hourly ecosystem fluxes dataset is used.
+```{r}
+# defining URL of data "df_for_stepwise_fregression.csv"
+url_stepwise_regression <- "https://raw.githubusercontent.com/geco-bern/agds_book/refs/heads/main/book/data/df_for_stepwise_regression.csv"
+
+# read the data directly from URL
+df_half_hourly_fluxes <- read.table(
+  url_stepwise_regression,
+  header = TRUE,
+  sep = ",",
+)
+# remove NA
+df_half_hourly_fluxes <- df_half_hourly_fluxes |>  
+  drop_na()
+```
+## Step 1: Linear Regression with p = 1
+For every predictor a linear regression model for GPP is performed. The number of predictors to be considered is p = 1. The variables: "Siteid", "TIMESTAMP", "GPP_NT_VUT_REF" and "USTAR" are not included as predictors as they are not physical or meteorological variables. After the fitting of all regression models their R² and AIC are computed and put into a table. 
+
+```{r}
+# defining the predictors 
+predictors <- df_half_hourly_fluxes |> 
+  names() |>
+  setdiff(c("siteid", "TIMESTAMP", "GPP_NT_VUT_REF", "USTAR"))
+
+# defining an empty list for linear regression models
+linmods <- list()
+
+for (i in predictors){
+  # letting R know to use the whole column and not just the string of i
+  formula <- as.formula(paste("GPP_NT_VUT_REF ~", i)) 
+  
+  # calculating linear regression model for every predictor
+  linmod <- lm(formula, data = df_half_hourly_fluxes)
+  
+  # save models to list, name them after the used predictor
+  linmods[[paste0("linmod_", i)]] <- linmod
+}
+
+
+# creating a table with the predictor, R²  and AIC
+table1_r2_AIC <- tibble(
+  predictor = predictors, 
+  r_squared = map_dbl(linmods, ~ summary(.)$r.squared),
+  AIC = map_dbl(linmods, ~ AIC(.))
+)
+```
+
+## Visualisation of R² and AIC for every predictor
+A plot showing R² and AIC is made. AIC is rescaled to a scale similar to R². R² is visualized as bars and AIC as a line to show both variables in one plot. 
+
+```{r, warning = FALSE}
+# creating a plot showing R² and AIC for every predictor
+plot1_R2_AIC_linmods <- ggplot(
+  data = table1_r2_AIC, 
+  aes(x = predictors)) +
+  geom_bar(aes(y = r_squared), stat = "identity", fill ="blue", width = 0.6) +
+  # rescalaing AIC to a scale similar to R²
+  geom_line(aes(y = (AIC - min(AIC))/10000), group = 1, color = "red", linewidth = 0.8) +
+  scale_y_continuous(
+    name = "R²",
+    sec.axis = sec_axis(~ . *500 + min(table1_r2_AIC$AIC), name = "AIC")
+  ) +
+  labs(title = "R² and AIC for p = 1 predictors",
+       x = "Predictors") +
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        axis.title.y.right = element_text(angle = 95)
+        ) +
+  # Legende hinzufügen
+ annotate("rect", xmin = 1, xmax = 2.5, ymin = 0.42, ymax = 0.48, fill = "white") + # weißer Hintergrund
+  annotate("segment", x = 1.1, xend = 1.3, y = 0.47, yend = 0.47, color = "red", size = 1) +
+  annotate("text", x = 1.4, y = 0.47, label = "AIC (scaled)", hjust = 0, size = 3) +
+  annotate("rect", xmin = 1.1, xmax = 1.3, ymin = 0.43, ymax = 0.45, fill = "blue") +
+  annotate("text", x = 1.4, y = 0.44, label = "R²", hjust = 0, size = 3)
+
+plot1_R2_AIC_linmods
+
+```
+
+PPFD_IN (13. predictor) has the highest  R² (0.363) and lowest AIC (45682.99) and is selected for the next steps of the stepwise forward regression. 
+
+## Step 2: Linear Regression with p+1
+Now all regression models are fitted with p + 1 predictors, taking PPFD_IN as the selected predictor from the previous step.  R² and AIC are then calculated and put into a table. 
+```{r}
+# defining p + 1 predictors
+selected_predictor <- "PPFD_IN"
+pplus1_predictors <- setdiff(predictors,  selected_predictor)
+
+# defining an empty list for linear regression models 
+linmods2 <- list()
+
+for (i in pplus1_predictors) {
+  # selecting variables for lm
+  formula2 <- as.formula(paste("GPP_NT_VUT_REF ~", selected_predictor, "+", i))
+
+  # calculating linear regression model for p + 1
+  linmod2 <- lm(formula2, data = df_half_hourly_fluxes)
+  
+  # save models to list, name them after the used predictor
+  linmods2[[paste0("linmod2_", i)]] <- linmod2
+}
+  
+# creating a table with the remaining predictors, R^2 and AIC
+table2_r2_AIC <- tibble(
+  predictor = pplus1_predictors, 
+  r_squared = map_dbl(linmods2, ~ summary(.)$r.squared), 
+  AIC = map_dbl(linmods2, ~ AIC(.))
+)
+```
+## Visualisation of R² and AIC for p + 1 predictors
+A plot showing R² and AIC is made again. AIC is rescaled to a scale similar to R². R² is visualized as bars and AIC as a line to show both variables in one plot. 
+
+```{r}
+plot2_R2_AIC_linmods <- ggplot(
+  data = table2_r2_AIC, 
+  aes(x = pplus1_predictors)) +
+  geom_bar(aes(y = r_squared), stat = "identity", fill ="blue", width = 0.6) +
+  # rescaling AIC to a scale similar to R^2
+  geom_line(aes(y = (AIC - min(AIC))/10000), group = 1, color = "red", linewidth = 0.8) +
+  scale_y_continuous(
+    name = "R²",
+    sec.axis = sec_axis(~ . *500 + min(table2_r2_AIC$AIC), name = "AIC")
+  ) +
+  labs(title = "R² and AIC for p+1 predictors",
+       x = "p + 1 Predictors") +
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        axis.title.y.right = element_text(angle = 95)
+        ) +
+  # Legende hinzufügen
+ annotate("rect", xmin = 10, xmax = 11.5, ymin = 0.42, ymax = 0.48, fill = "white") + # weißer Hintergrund
+  annotate("segment", x = 10.1, xend = 10.3, y = 0.47, yend = 0.47, color = "red", size = 1) +
+  annotate("text", x = 10.4, y = 0.47, label = "AIC (scaled)", hjust = 0, size = 3) +
+  annotate("rect", xmin = 10.1, xmax = 10.3, ymin = 0.43, ymax = 0.45, fill = "blue") +
+  annotate("text", x = 10.4, y = 0.44, label = "R²", hjust = 0, size = 3)
+
+
+plot2_R2_AIC_linmods
+```
+
+
+
+LW_IN_F (3. predictor) has the highest R² (0.437) and the smallest AIC (44501.85). 
+
+## Step 3: Linear Regression with p+2
+The linear regression models with p + 1 predictors have lower (better) values for AIC than the models with p = 1. Therefore all linear regression models are now fitted with p + 2 predictors, taking LW_IN_F as the selected_predictor2.  Then R² and AIC are calculated and put into a table. 
+
+```{r}
+# defining p + 2 predicotrs
+selected_predictor2 <- "LW_IN_F"
+pplus2_predictors <- setdiff(pplus1_predictors, selected_predictor2)
+
+# defining an empty list for linear regression models
+linmods3 <- list()
+
+for (i in pplus2_predictors){
+  # selecting variables for lm
+  formula3 <- as.formula(paste("GPP_NT_VUT_REF ~", selected_predictor2, "+", i))
+  
+  # calculating linear regression model for p + 2
+  linmod3 <- lm(formula3, data = df_half_hourly_fluxes)
+  
+  # save models to list, name them after the used predictor
+  linmods3[[paste0("linmod3_", i)]] <- linmod3
+}
+
+# creating a table with the remaining predictors, R²and AIC
+table3_r2_AIC <- tibble(
+  predictors = pplus2_predictors, 
+  r_squared = map_dbl(linmods3, ~ summary(.)$r.squared),
+  AIC = map_dbl(linmods3, ~ AIC(.))
+)
+
+```
+The AIC for the model with p + 2 is poorer than the AIC of the model with p + 1 predictors. So the algorithm is not continued because the (presumably) optimal model (p + 1) was found. 
+
+## Visualization of the stepwise forward regression
+The progress of the stepwise forward regression is visualized, showing AIC values over the steps of the algorithm. 
+```{r}
+# defining a table which shows the progress of the stepwise forward regression
+stepwise_progress <- tibble(
+  step = c(1:3), 
+  predictor_added = c("PPFD_IN", "LW_IN_F", "more"), 
+  predictors_in_model = c("PPFD_IN", " PPFD_IN + LW_IN_F", "more"),
+  AIC = c(45682.99, 44501.85, 44648.41), 
+  R2 = c(0.3627837474, 0.4374452, 0.4286934)
+)
+
+# plotting the development of AIC over the steps
+plot_stepwise_progress <- ggplot(
+  data = stepwise_progress, 
+  aes (x = step, y = AIC)) +
+  geom_line(color = "red")+
+  geom_point(size = 2) +
+  labs(title = "AIC over the steps of stepwise forward regression", 
+  x = "Step", 
+  y = "AIC") +
+  theme_classic()
+
+plot_stepwise_progress
+
+```
+
+# Results
+The presumably best model could be found using stepwise forward regression. The linear regression model with p + 1, taking "PPFD_IN" and "LW_IN_F" as predictors for modelling GPP, achieved the best R² (0.4374452) and AIC (44501.85). 
+
+# Interpretation
+
+"PPFD_IN" is the primary energy source of photosynthesis which is the foundation of "GPP". "PPFD_IN"'s strong and direct influence on the total "GPP" explains the high R² and why it was selected as a predictor. But "PPFD_IN" can't predict GPP alone. 
+Variables like "SW_IN_F" or "CO2_F_MDS" should have also a high influence on "GPP" in theory. But because they are very correlated with "PPFD_IN", they didn't really add much new information to the model. That's why these variables didn't significantly improve the R² or AIC values in the second step. However "LW_IN_F" provided new information that wasn't captured by "PPFD_IN" already. This explains why it had the highest R² and was chosen as the second predictor.

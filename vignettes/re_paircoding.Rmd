@@ -1,0 +1,11 @@
+---
+title: "re_paircoding"
+author: "Lisa Raemy"
+date: "2025-03-31"
+output: html_document
+---
+The links to the two github repositories for excercise 8: 
+
+https://github.com/lraemy1/8_jonathan_lisa
+
+https://github.com/joenuu/8a_jonathan_lisa

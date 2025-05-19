@@ -1,0 +1,204 @@
+---
+title: "re_airquality"
+author: "Lisa Raemy"
+date: "2025-03-10"
+output: html_document
+---
+# Telling a story from data
+## Libraries
+
+```{r, message = FALSE}
+library(tidyr)
+library(readr)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+```
+
+# Introduction
+
+The goal of this analysis is to determine whether there is a positive correlation between temperature and ozone concentration and how this relationship varies from May to September in 1973.
+
+It is expected, that higher temperatures positively correlate with higher ozone concentrations, because higher temperatures are often accompanied by stronger and faster photochemical reactions. 
+
+## Description of the airquality dataset
+
+The ozone data "datasets::airquality" comes from the New York State Department of Conservation and the meteorological data from the National Weather Service.
+
+The dataset shows air quality measurements in New York from May to September in 1973.
+
+It contains 6 variables:<br>
+Ozone [,1] = Ozone (ppb)<br>
+Solar.R [,2] = Solar Radiation (lang)<br>
+Wind [,3]	= Wind (mph)<br>
+Temp [,4]	= Temperature (degrees F)<br>
+Month [,5] = Month (1-12)<br>
+Day [,6] = Day of month (1-31)<br>
+
+Information was found here: 
+
+```{r, message = FALSE}
+#looking at background information of the data
+?airquality
+```
+
+# Data analysis 
+
+## Loading and cleaning data
+
+Data is loaded and NA are removed.
+
+```{r}
+airquality <- datasets::airquality
+airquality_clean <- na.omit(airquality)
+```
+## Statistical metrics
+
+Several statistical parameters (min, 1st quantile, median, mean, 3rd quantile and max) are calculated and data is visualized to get a feel for the data and it's distribution.
+
+```{r}
+# calculating statistical parameters
+summary(airquality$Ozone)
+summary(airquality$Temp)
+
+# plotting data to get a feeling for it's distribution
+ggplot(data = airquality_clean, 
+      aes(x=Temp, 
+          y=Ozone)) +
+      labs(title = "Ozone and Temperature in 1973") +
+      geom_point()
+```
+
+
+## Correlation between temperature and ozone
+
+To answer the research question the overall correlation between temperature and ozone is calculated. 
+
+```{r}
+# calculating correlation between temperature and ozone with pearson-correlation
+corr_test <- airquality_clean |>
+  with(cor.test(Temp, Ozone))
+
+# showing only correlation and p_value 
+corr_summary <- tibble( 
+  correlation = corr_test$estimate, 
+  p_value = corr_test$p.value)
+corr_summary
+```
+
+## Calculating regression between ozone and temperature
+A linear regression model is performed, looking at ozone and temperature. 
+
+```{r}
+# making linear regression model
+regression_airquality_clean <- airquality_clean |>
+  lm(Ozone~Temp, data = _) # data=_, takes the data that comes out
+
+# showing results of the linear regression model
+summary(regression_airquality_clean)
+```
+
+## Making a scatterplot with regressionline
+To visualize the linear regression between ozone and temperature a scatterplot is made.
+
+```{r}
+# scatterplot showing linear regression between ozone and temperature
+airquality_clean |>
+  ggplot(
+  aes(x=Temp, y=Ozone)) +
+  geom_point(size=0.5) +
+  geom_smooth(method="lm", color = "red", se=FALSE) +
+  labs(title="Relationship between temperature and ozone",
+       x="Temperature (°F)",
+       y="Ozone (ppb)") +
+  theme_classic()
+```
+
+## Correlation between ozone and temperature over the months
+Now that a positive correlation between ozone and temperature was found, this relationship and its variation over the months of May to September is being analyzed. 
+
+First the mean temperature and mean ozone for every month is calculated to get a feel for the data.
+
+```{r}
+# calculating mean temp and mean ozone for every month
+mean_monthly_airquality <- airquality_clean |> 
+  dplyr::group_by(Month) |> 
+  dplyr::summarize(mean_temp = mean(Temp),
+                  mean_ozone = mean(Ozone))
+```
+
+Then the correlation between ozone and temperature is calculated for every month.
+Changes in the relationship between ozone and temperature over the months are being analyzed.
+
+```{r}
+# calculating the correlation for every month
+monthly_corr_test <- airquality_clean |>
+  dplyr::group_by(Month) |>
+  dplyr::summarize(correlation= cor(Temp, Ozone), 
+         p_value = cor.test(Temp, Ozone)$p.value)
+
+# making one data frame --> joining the means in mean_monthly_airquality and the monthly correlation in monthly_corr_test
+monthly_summary <- left_join(mean_monthly_airquality, monthly_corr_test, by="Month")
+```
+
+## Linear regression between ozone and temperature over the months
+The scatterplot below shows the linear regression between ozone and temperature for each month. The high correlation suggests that a linear regression is a useful model for this relationship. 
+
+```{r}
+# make a new factor variable with the names of the months, the numbers in the data stay
+airquality_clean <- airquality_clean|> 
+  mutate(Month_label = factor(Month, 
+                              levels = 5:9, 
+                              labels = c("May", "June", "July", "August", "September")))
+
+# plotting the data
+# plot that shows linear regression between temperature and ozone over the months
+ggplot(
+  data=airquality_clean, 
+  aes(x = Temp, y = Ozone)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", color= "red", se=FALSE) +
+  labs(title = "Linear regression between temperature and ozone over the months",
+       x = "Temperature (°F)",
+       y = "Ozone (ppb)") +
+  facet_wrap(~Month_label)
+```
+
+## Checking variations in ozone concentration over time
+A box plot that shows the distribution of ozone concentration over time is made. 
+```{r}
+# making a boxplot that shows the distribution of the ozone concentration over time
+airquality_clean |> 
+  ggplot(
+  aes(x = Month_label, y = Ozone)) +
+  geom_boxplot(fill = "blue") +
+  labs(title = "Ozone concentration over the months", 
+       x = "Months",
+       y = "Ozone (ppb)") +
+  theme_classic()
+```
+
+# Key findings and discussion
+
+A statistically significant positive correlation between temperature and ozone concentration could be confirmed.
+
+The Pearson correlation coefficient of 0.689 suggests that higher temperatures are associated with higher ozone concentrations. 
+
+The linear regression model describes the relationship between ozone concentration and temperature in more detail.
+It indicates that for every 1° F increase in temperature the ozone concentration increases approximately by 2.44 ppb. 
+The multiple R-squared shows that approximately 48.8% of the ozone variability can be explained through temperature. The remaining 51.2% can be explained by other factors that are not included in this model. 
+
+The correlation between ozone and temperature varies across months showing that the relationship between ozone and temperature is not constant. 
+The highest correlation is found in September, followed by July.
+All correlations are statistically significant, only in June the p-value is very close to the limit value but still under 0.05.
+
+The linear regression analysis across months shows that July and August have the steepest slopes, meaning that changes in temperature strongly influence the ozone concentration during these months. Flatter slopes (May, June and September) show a weaker temperature-ozone relationship.
+The weaker relationship during May and June may be due to weaker solar radiation during these months. In September we have decreasing temperatures which could lead to this weaker relationship.
+There are also a number of outliers that could influence the steepness of the slope. 
+
+The boxplot analysis of ozone concentration over time shows that the ozone concentration peaks in July and then decreases until September.
+July and August have the highest median ozone levels and also the widest interquartile ranges, which indicates a high variability in ozone levels. 
+May, June and September have smaller interquartile ranges, which means ozone levels are more stable. 
+This variability could be due to changing weather conditions during summer.
+September has the highest number of outliers in ozone concentration. 
+
