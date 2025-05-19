@@ -6,7 +6,7 @@ output:
   html_document:
     toc: true 
 ---
-# Superwised machine learning I
+# Supervised machine learning I
 ## Libraries
 ```{r, message = FALSE}
 library(dplyr)
