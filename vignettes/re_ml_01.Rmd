@@ -6,7 +6,10 @@ output:
   html_document:
     toc: true 
 ---
-# Supervised machine learning I
+
+# Introduction
+In this exercise linear regression and KNN models are being compared. The model performances are evaluated on the training and test set. The goal of this exercise is to interpret and understand the observed differences. 
+
 ## Libraries
 ```{r, message = FALSE}
 library(dplyr)
@@ -21,9 +24,6 @@ eval_model
 #loading eval_model (function)
 source("../R/eval_model_re_ml_01.R")
 ```
-
-# Introduction
-In this exercise linear regression and KNN models are being compared. The model performances are evaluated on the training and test set. The goal of this exercise is to interpret and understand the observed differences. 
 
 # Implementation of code
 The code from chapter 10 of the agds book was adapted for fitting and evaluating the regression model and the KNN models. 
