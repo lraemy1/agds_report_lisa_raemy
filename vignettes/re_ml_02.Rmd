@@ -1,0 +1,351 @@
+---
+title: "re_ml02"
+author: "Lisa Raemy"
+date: "2025-05-05"
+output: html_document
+---
+# Supervised machine learning II
+## Libraries
+```{r setup, message = FALSE}
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyr)
+library(caret)
+library(recipes)
+```
+eval_model
+```{r}
+#showing Rmarkdown weher to find eval_model
+source("../R/eval_model_re_ml_01.R")
+```
+
+# Introduction
+The goal of this exercise is to explore to role of structure in data for model generisability and how to best estimate a "true" out-of-sample error that corresponds to the prediction task. 
+Flux data from two sites was used: Davos (CH-Dav) (FLX_CH-Dav_FLUXNET2015_FULLSET_DD_1997-2014_1-3.csv)
+and Laegern (CH-Lae) (FLX_CH-Lae_FLUXNET2015_FULLSET_DD_2004-2014_1-4.csv).
+
+Three KNN-models were trained: One for Davos only, one for Laegern only and one for both together. Then these models were tested on each of the three test datasets that were set aside. Each model was then evaluated. 
+
+## Characteristics of the sites
+**Davos**<br>
+-	Years data available: 1997 - 2014<br>
+-	Elevation (m): 1639<br>
+-	Vegetation IGBP: Evergreen needleleaf forests (almost all trees remain green all year). Dominated by woody vegetation with a percent cover > 60% and height exeeding 2 meter<br>
+-	Mean annual Temp (°C): 2.8<br>
+-	Mean annual Percip. (mm): 1062<br>
+(Zielis at al., 2014)
+
+**Laegern**<br>
+-	Years data available: 2004 - 2014<br>
+-	Elevation (m): 689<br>
+-	Vegetatioin IGBP: Mixed Forests with a precent cover of trees > 60% and height exeeding 2 meters<br>
+-	Mean annual Temp (°C): 8.3<br>
+-	Mean annual Percip. (mm): 1100<br> 
+ (Etzold et al., 2011) 
+
+# Implementation of code
+## Loading data
+Data from the two sites Davos and Laegern is loaded and then combined to a third set, which contains data from both sites.
+
+```{r, message = FALSE}
+# loading flux data from Davos
+daily_fluxes_dav <- readr::read_csv("../data/FLX_CH-Dav_FLUXNET2015_FULLSET_DD_1997-2014_1-3.csv")
+
+# loading flux data from Laegern
+daily_fluxes_lae <- readr::read_csv("../data/FLX_CH-Lae_FLUXNET2015_FULLSET_DD_2004-2014_1-4.csv")
+
+# Adding a column to keep track of the site origin 
+daily_fluxes_dav$site <- "Davos"
+daily_fluxes_lae$site <- "Laegern"
+
+# Combining Dav and Lae into one dataset
+daily_fluxes_both <- dplyr::bind_rows(daily_fluxes_dav, daily_fluxes_lae)
+
+```
+
+## Data wrangling 
+The data sets are being prepared. Only good-quality data is selected. The variable P_F is being removed, because it only contains NA's in the dataset of Laegern.
+
+Data wrangling for Davos: 
+```{r}
+daily_fluxes_dav <- daily_fluxes_dav |>
+ # selecting only the variables we are interested in
+  dplyr::select(TIMESTAMP,
+                GPP_NT_VUT_REF,    # the target
+                ends_with("_QC"),  # quality control info
+                ends_with("_F"),   # includes all meteorological covariates
+                -contains("JSB"), # weird useless variable
+                -contains("P_F")  # because in Laegern only NA
+                ) |>
+        
+
+  # converting to a nice date object
+  dplyr::mutate(TIMESTAMP = lubridate::ymd(TIMESTAMP)) |>
+
+  # setting all -9999 to NA
+  dplyr::mutate(across(where(is.numeric), ~na_if(., -9999))) |> 
+
+  
+  # retaining only data based on >=80% good-quality measurements
+  # overwriting bad data with NA (not dropping rows)
+  dplyr::mutate(GPP_NT_VUT_REF = ifelse(NEE_VUT_REF_QC < 0.8, NA, GPP_NT_VUT_REF),
+                TA_F           = ifelse(TA_F_QC        < 0.8, NA, TA_F),
+                SW_IN_F        = ifelse(SW_IN_F_QC     < 0.8, NA, SW_IN_F),
+                LW_IN_F        = ifelse(LW_IN_F_QC     < 0.8, NA, LW_IN_F),
+                VPD_F          = ifelse(VPD_F_QC       < 0.8, NA, VPD_F),
+                PA_F           = ifelse(PA_F_QC        < 0.8, NA, PA_F),
+                WS_F           = ifelse(WS_F_QC        < 0.8, NA, WS_F)) |> 
+
+  # drop QC variables (no longer needed)
+  dplyr::select(-ends_with("_QC"))
+
+```
+Data wrangling for Laegern: 
+```{r}
+daily_fluxes_lae <- daily_fluxes_lae |>
+ # selecting only the variables we are interested in
+  dplyr::select(TIMESTAMP,
+                GPP_NT_VUT_REF,    # the target
+                ends_with("_QC"),  # quality control info
+                ends_with("_F"),   # includes all meteorological covariates
+                -contains("JSB"),  # weird useless variable
+                -contains("P_F")
+                ) |>
+
+  # converting to a nice date object
+  dplyr::mutate(TIMESTAMP = lubridate::ymd(TIMESTAMP)) |>
+
+  # setting all -9999 to NA
+  dplyr::mutate(across(where(is.numeric), ~na_if(., -9999))) |> 
+
+  
+  # retaining only data based on >=80% good-quality measurements
+  # overwriting bad data with NA (not dropping rows)
+  dplyr::mutate(GPP_NT_VUT_REF = ifelse(NEE_VUT_REF_QC < 0.8, NA, GPP_NT_VUT_REF),
+                TA_F           = ifelse(TA_F_QC        < 0.8, NA, TA_F),
+                SW_IN_F        = ifelse(SW_IN_F_QC     < 0.8, NA, SW_IN_F),
+                LW_IN_F        = ifelse(LW_IN_F_QC     < 0.8, NA, LW_IN_F),
+                VPD_F          = ifelse(VPD_F_QC       < 0.8, NA, VPD_F),
+                PA_F           = ifelse(PA_F_QC        < 0.8, NA, PA_F),
+                WS_F           = ifelse(WS_F_QC        < 0.8, NA, WS_F)) |> 
+
+  # drop QC variables (no longer needed)
+  dplyr::select(-ends_with("_QC"))
+
+```
+Data wrangling for dataset Davos + Laegern: 
+
+```{r}
+daily_fluxes_both <- daily_fluxes_both |>
+ # selecting only the variables we are interested in
+  dplyr::select(TIMESTAMP,
+                GPP_NT_VUT_REF,    # the target
+                ends_with("_QC"),  # quality control info
+                ends_with("_F"),   # includes all meteorological covariates
+                -contains("JSB"),   # weird useless variable
+                -contains("P_F") 
+                ) |>
+
+  # converting to a nice date object
+  dplyr::mutate(TIMESTAMP = lubridate::ymd(TIMESTAMP)) |>
+
+  # setting all -9999 to NA
+  dplyr::mutate(across(where(is.numeric), ~na_if(., -9999))) |> 
+
+  
+  # retaining only data based on >=80% good-quality measurements
+  # overwriting bad data with NA (not dropping rows)
+  dplyr::mutate(GPP_NT_VUT_REF = ifelse(NEE_VUT_REF_QC < 0.8, NA, GPP_NT_VUT_REF),
+                TA_F           = ifelse(TA_F_QC        < 0.8, NA, TA_F),
+                SW_IN_F        = ifelse(SW_IN_F_QC     < 0.8, NA, SW_IN_F),
+                LW_IN_F        = ifelse(LW_IN_F_QC     < 0.8, NA, LW_IN_F),
+                VPD_F          = ifelse(VPD_F_QC       < 0.8, NA, VPD_F),
+                PA_F           = ifelse(PA_F_QC        < 0.8, NA, PA_F),
+                WS_F           = ifelse(WS_F_QC        < 0.8, NA, WS_F)) |> 
+
+  # drop QC variables (no longer needed)
+  dplyr::select(-ends_with("_QC"))
+
+```
+## Data spliting and formulation of the preprocessing recipe
+
+Data is split into a training (80%) and test (20%) set and the preprocessing recipe is formulated.
+```{r}
+# data splitting for Davos
+
+set.seed(123)  # for reproducibility
+split <- rsample::initial_split(daily_fluxes_dav, prop = 0.8, strata = "VPD_F")
+daily_fluxes_dav_train <- rsample::training(split)
+daily_fluxes_dav_test <- rsample::testing(split)
+
+# fromulating pp for Davos
+pp_dav <- recipes::recipe(GPP_NT_VUT_REF ~ SW_IN_F + VPD_F + TA_F, 
+                      data = daily_fluxes_dav_train) |> 
+  recipes::step_center(recipes::all_numeric(), -recipes::all_outcomes()) |>
+  recipes::step_scale(recipes::all_numeric(), -recipes::all_outcomes())
+
+# data splitting for Laegern
+
+set.seed(123)  # for reproducibility
+split <- rsample::initial_split(daily_fluxes_lae, prop = 0.8, strata = "VPD_F")
+daily_fluxes_lae_train <- rsample::training(split)
+daily_fluxes_lae_test <- rsample::testing(split)
+
+# fromulating pp for Laegern
+pp_lae <- recipes::recipe(GPP_NT_VUT_REF ~ SW_IN_F + VPD_F + TA_F, 
+                      data = daily_fluxes_lae_train) |> 
+  recipes::step_center(recipes::all_numeric(), -recipes::all_outcomes()) |>
+  recipes::step_scale(recipes::all_numeric(), -recipes::all_outcomes())
+
+# data splitting for "both"
+
+set.seed(123)  # for reproducibility
+split <- rsample::initial_split(daily_fluxes_both, prop = 0.8, strata = "VPD_F")
+daily_fluxes_both_train <- rsample::training(split)
+daily_fluxes_both_test <- rsample::testing(split)
+
+# Formulating pp for "both"
+pp_both <- recipes::recipe(GPP_NT_VUT_REF ~ SW_IN_F + VPD_F + TA_F, 
+                      data = daily_fluxes_both_train) |> 
+  recipes::step_center(recipes::all_numeric(), -recipes::all_outcomes()) |>
+  recipes::step_scale(recipes::all_numeric(), -recipes::all_outcomes())
+```
+## Training models with optimal k 
+A 10-fold cross validation is implemented to train the models with optimal k. 
+
+```{r}
+# finding optimal k and training model with optimal k for Davos
+set.seed(1982)
+mod_dav_cv <- caret::train(pp_dav, 
+                       data = daily_fluxes_dav_train |> drop_na(), 
+                       method = "knn",
+                       trControl = caret::trainControl(method = "cv", number = 10),
+                       tuneGrid = data.frame(k = c(2, 5, 10, 15, 20, 25, 30, 35, 40, 60, 100)),
+                       metric = "MAE")
+# finding optimal k and training model with optimal k for Laegern
+set.seed(1982)
+mod_lae_cv <- caret::train(pp_lae, 
+                       data = daily_fluxes_lae_train |> drop_na(), 
+                       method = "knn",
+                       trControl = caret::trainControl(method = "cv", number = 10),
+                       tuneGrid = data.frame(k = c(2, 5, 10, 15, 20, 25, 30, 35, 40, 60, 100)),
+                       metric = "MAE")
+
+# finding optimal k and training model with optimal k for "both"
+set.seed(1982)
+mod_both_cv <- caret::train(pp_both, 
+                       data = daily_fluxes_both_train |> drop_na(), 
+                       method = "knn",
+                       trControl = caret::trainControl(method = "cv", number = 10),
+                       tuneGrid = data.frame(k = c(2, 5, 10, 15, 20, 25, 30, 35, 40, 60, 100)),
+                       metric = "MAE")
+
+# finding out the optimal k
+mod_dav_cv$bestTune
+mod_lae_cv$bestTune
+mod_both_cv$bestTune
+```
+The models were trained with k = 20 for data of Davos and Laegern and with k = 40 for the dataset of Davos + Laegern.
+
+## Testing the models
+
+Each model is tested on the test datasets from all three sites. Then three tables are created, one for each model, with the evaluation metrics on all test sets. 
+The evaluation model was defined in a separate R file called "eval_model_re_ml_01" created in chapter 10. 
+
+Testing model trained on data from Davos: 
+```{r}
+# Evaluation against Davos test set
+met_dav_dav <- eval_model(mod = mod_dav_cv, df_train = daily_fluxes_dav_train, df_test = daily_fluxes_dav_test)
+
+# Evaluation against Laegern test set
+met_dav_lae <- eval_model(mod = mod_dav_cv, df_train = daily_fluxes_dav_train, df_test = daily_fluxes_lae_test)
+
+
+# Evaluation against Davos + Laegern test set
+met_dav_both <- eval_model(mod = mod_dav_cv, df_train = daily_fluxes_dav_train, df_test = daily_fluxes_both_test)
+```
+
+Testing model trained on data from Laegern:
+```{r, message = FALSE}
+# Evaluation against Davos test set
+met_lae_dav <- eval_model(mod = mod_lae_cv, df_train = daily_fluxes_lae_train, df_test = daily_fluxes_dav_test)
+
+# Evaluation against Laegern test set
+met_lae_lae <- eval_model(mod = mod_lae_cv, df_train = daily_fluxes_lae_train, df_test = daily_fluxes_lae_test)
+
+# Evaluation against Davos + Laegern test set
+met_lae_both <- eval_model(mod = mod_lae_cv, df_train = daily_fluxes_lae_train, df_test = daily_fluxes_both_test)
+```
+
+Testing model trained on data from both Davos + Laegern: 
+```{r, message = FALSE}
+# Evaluation against Davos test set
+met_both_dav <- eval_model(mod = mod_both_cv, df_train = daily_fluxes_both_train, df_test = daily_fluxes_dav_test)
+
+# Evaluation against Laegern test set
+met_both_lae <- eval_model(mod = mod_both_cv, df_train = daily_fluxes_both_train, df_test = daily_fluxes_lae_test) 
+
+# Evaluation against Davos + Laegern test set
+met_both_both <-eval_model(mod = mod_both_cv, df_train =  daily_fluxes_both_train, df_test = daily_fluxes_both_test)
+```
+
+A table with the results / metrics for each model is created.
+```{r, message = FALSE}
+# table for model trained on data from davos
+results_mod_dav <- tibble::tibble(
+  `Model trained on data from Davos` = c("Evaluation against Davos test set", "Evaluation against Laegern test set", "Evaluation against Davos + Laegern test set"), 
+  `R²` = c(met_dav_dav$R2, met_dav_lae$R2, met_dav_both$R2), 
+  `RMSE` = c(met_dav_dav$RMSE, met_dav_lae$RMSE, met_dav_both$RMSE)
+)
+
+print(results_mod_dav)
+
+# table for model trained on data from Laegern
+results_mod_lae <- tibble::tibble(
+  `Model trained on data from Laegern` = c("Evaluation against Davos test set", "Evaluation against Laegern test set", "Evaluation against Davos + Laegern test set"), 
+  `R²` = c(met_lae_dav$R2, met_lae_lae$R2, met_lae_both$R2), 
+  `RMSE` = c(met_lae_dav$RMSE, met_lae_lae$RMSE, met_lae_both$RMSE)
+)
+
+print(results_mod_lae)
+
+# table for model trained on data from Davos + Laegern
+results_mod_both <- tibble::tibble(
+  `Model trained on data from Davos + Laegern` = c("Evaluation against Davos test set", "Evaluation against Laegern test set", "Evaluation against Davos + Laegern test set"), 
+  `R²` = c(met_both_dav$R2, met_both_lae$R2, met_both_both$R2), 
+  `RMSE` = c(met_both_dav$RMSE, met_both_lae$RMSE, met_both_both$RMSE)
+)
+
+print(results_mod_both)
+```
+
+Displaying the tables
+```{r, results ='asis'}
+# display table for model trained on data from Davos
+knitr::kable(results_mod_dav, digits = 2, caption = "Model trained on data from Davos")
+
+# display table for model trained on data from Laegern
+knitr::kable(results_mod_lae, digits = 2, caption = "Model trained on data from Laegern")
+
+# display table for model trained on data from Davos + Laegern
+knitr::kable(results_mod_both, digits = 2, caption = "Model trained on data from Davos + Laegern")
+```
+
+# Interpretation 
+
+The tables show, that the best performance (high R² and low RSME) of the model is achieved when training and test data are the same. The performance drops when the models are tested on a different site. 
+The reason for that are different site-specific characteristics. Davos has needleleaf vegetation and a high elevation with colder climate, while Laegern has a mixed forest and lower elevation, meaning more temperate climate. These characteristics influence the variables that are used to predict GPP. KNN is sensitive to structure. This means the model has some bias because it learned relationships that hold in one ecological context (site) but not the other. 
+
+The model trained on both sites performs more balanced than the models trained on one site. It performs worse than single-site models on their own sites but because it has seen a bigger range of ecological conditions, it can generalize better. The trade-off is, that is looses a bit of site-specific accuracy in order to gain generalization. 
+
+In this analysis true out-of-sample testing wasn't performed, because it didn't involve data from a completely new, unseen site. Even with separate data splits, training and testing was performed on the same sites with the same distribution, making generalization easier. 
+
+If true out-of-sample testing would be performed (f.ex. with data from Spain) the performance is expected to be worse, especially if the variables are outside of the range the model has seen before. This is due to different site characteristics. Even though Laegern and Davos have different site characteristics, they're still quite similar as they are located in the same country and climate zone. Depending on the new site that is taken, the differences between the site's are much more bigger than in this analysis, meaning worse performance. 
+
+# References
+Site information Davos:<br> 
+Zielis, S., Etzold, S., Zweifel, R., Eugster, W., Haeni, M. and Buchmann, N.: NEP of a Swiss subalpine forest is significantly driven not only by current but also by previous year’s weather, Biogeosciences, 11(6), 1627–1635, 2014.
+
+Site information Laegern:<br>
+Etzold, S., Ruehr, N. K., Zweifel, R., Dobbertin, M., Zingg, A., Pluess, P., Häsler, R., Eugster, W. and Buchmann, N.: The Carbon Balance of Two Contrasting Mountain Forest Ecosystems in Switzerland: Similar Annual Trends, but Seasonal Differences, Ecosystems, 14(8), 1289–1309, 2011..
